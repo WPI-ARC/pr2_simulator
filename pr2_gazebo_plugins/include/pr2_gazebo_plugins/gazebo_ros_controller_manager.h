@@ -43,6 +43,8 @@
 #include "pr2_controller_manager/controller_manager.h"
 #include "pr2_gazebo_plugins/SetModelsJointsStates.h"
 #include "pr2_mechanism_model/robot.h"
+#include <pr2_controllers_msgs/JointTrajectoryControllerState.h>
+
 #include <tinyxml.h>
 #include <ros/ros.h>
 #undef USE_CBQ
@@ -81,6 +83,8 @@ private:
   /// \brief Service Call Name
   //private: ParamT<std::string> *setModelsJointsStatesServiceNameP;
   //private: std::string setModelsJointsStatesServiceName;
+
+  void setPr2JointGoals(const pr2_controllers_msgs::JointTrajectoryControllerState& msg);
 
   /*
    * \brief read pr2.xml for actuators, and pass tinyxml node to mechanism control node's initXml.

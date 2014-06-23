@@ -24,6 +24,7 @@
   <depend package="angles" />
   <depend package="pr2_hardware_interface" />
   <depend package="pr2_controller_manager" />
+  <depend package="pr2_controllers_msgs" />
   <depend package="pr2_mechanism_model" />
   <depend package="bullet" />
   <depend package="urdf" />

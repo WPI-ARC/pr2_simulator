@@ -45,6 +45,10 @@
 #include "physics/PhysicsTypes.hh"
 #include "physics/Base.hh"
 
+// ADDED for position control
+//#include <trajectory_msgs/JointTrajectoryState.h>
+// #include <trajectory_msgs/JointTrajectoryPoint.h>
+#include <pr2_controllers_msgs/JointTrajectoryControllerState.h>
 
 #include <angles/angles.h>
 #include <urdf/model.h>
@@ -54,16 +58,42 @@ namespace gazebo {
 
 GazeboRosControllerManager::GazeboRosControllerManager()
 {
+
 }
 
 /// \brief callback for setting models joints states
 bool setModelsJointsStates(pr2_gazebo_plugins::SetModelsJointsStates::Request &req,
                            pr2_gazebo_plugins::SetModelsJointsStates::Response &res)
 {
-
+  ROS_DEBUG("setModelsJointsStates");
   return true;
 }
 
+// TODO change the length of array to number of joints
+double des_position[100];
+
+void GazeboRosControllerManager::setPr2JointGoals(const pr2_controllers_msgs::JointTrajectoryControllerState& msg)
+{
+    //ROS_INFO("received point r_arm");
+
+    //this->joints_.size()
+
+    for( size_t i = 0; i < msg.desired.positions.size(); i++ )
+    {
+        //lookup for the joint index
+        //
+        for (unsigned int j = 0; j < this->joints_.size(); j++) 
+        {
+
+            if ( strcmp(this->joints_[j]->GetName().c_str(), msg.joint_names[i].c_str()) == 0 ) 
+            {
+                des_position[j] = msg.desired.positions[i];
+                //ROS_INFO("received point: [%s] [%f]", msg.joint_names[i].c_str() , msg.desired.positions[i] );
+            }
+        }
+            //ROS_INFO("received point: [%s] [%f]", msg.joint_names[i].c_str() , msg.desired.positions[i] );
+    }
+}
 
 GazeboRosControllerManager::~GazeboRosControllerManager()
 {
@@ -116,7 +146,7 @@ void GazeboRosControllerManager::Load(physics::ModelPtr _parent, sdf::ElementPtr
       boost::bind(&GazeboRosControllerManager::UpdateChild, this));
   gzdbg << "plugin model name: " << modelName << "\n";
 
-
+  this->world->EnablePhysicsEngine(false); //TODO should be false
 
 
   if (getenv("CHECK_SPEEDUP"))
@@ -201,7 +231,6 @@ void GazeboRosControllerManager::Load(physics::ModelPtr _parent, sdf::ElementPtr
   // start custom queue for controller manager
   this->controller_manager_callback_queue_thread_ = boost::thread( boost::bind( &GazeboRosControllerManager::ControllerManagerQueueThread,this ) );
 #endif
-
 }
 
 
@@ -240,7 +269,7 @@ void GazeboRosControllerManager::UpdateChild()
                     angles::shortest_angular_distance(this->fake_state_->joint_states_[i].position_,hj->GetAngle(0).Radian());
       this->fake_state_->joint_states_[i].velocity_ = hj->GetVelocity(0);
       //if (this->joints_[i]->GetName() == "torso_lift_motor_screw_joint")
-      //  ROS_WARN("joint[%s] [%f]",this->joints_[i]->GetName().c_str(), this->fake_state_->joint_states_[i].position_);
+      //ROS_WARN("joint[%s] [%f]",this->joints_[i]->GetName().c_str(), this->fake_state_->joint_states_[i].position_);
     }
     else if (this->joints_[i]->HasType(gazebo::physics::Base::SLIDER_JOINT))
     {
@@ -255,10 +284,11 @@ void GazeboRosControllerManager::UpdateChild()
     }
     else
     {
-      /*
-      ROS_WARN("joint[%s] is not hinge [%d] nor slider",this->joints_[i]->GetName().c_str(),
-        (unsigned int)gazebo::physics::Base::HINGE_JOINT
-        );
+      
+//      ROS_WARN("joint[%s] is not hinge [%d] nor slider",this->joints_[i]->GetName().c_str(),
+//        (unsigned int)gazebo::physics::Base::HINGE_JOINT
+//        );
+/*
       for (unsigned int j = 0; j < this->joints_[i]->GetTypeCount(); j++)
       {
         ROS_WARN("  types: %d hinge[%d] slider[%d]",(unsigned int)this->joints_[i]->GetType(j),(unsigned int)this->joints_[i]->HasType(gazebo::physics::Base::HINGE_JOINT),(unsigned int)this->joints_[i]->HasType(gazebo::physics::Base::SLIDER_JOINT));
@@ -300,36 +330,53 @@ void GazeboRosControllerManager::UpdateChild()
     if (!this->joints_[i])
       continue;
 
+
     double effort = this->fake_state_->joint_states_[i].commanded_effort_;
+    //double position = 0.1;
 
-    double damping_coef = 0;
-    if (this->cm_->state_ != NULL) // could be NULL if ReadPr2Xml is unsuccessful
+//    ROS_WARN("gazebo [%s] command [%f] position [%f]",this->joints_[i]->GetName().c_str(), effort, position);
+    
+    try
     {
-      if (this->cm_->state_->joint_states_[i].joint_->dynamics)
-        damping_coef = this->cm_->state_->joint_states_[i].joint_->dynamics->damping;
+        this->joints_[i]->SetAngle( 0, des_position[i] );
+    }
+    catch (int e)
+    {
+        ROS_WARN("set angles is falied");
     }
 
-    if (this->joints_[i]->HasType(gazebo::physics::Base::HINGE_JOINT))
+    bool physics = true;
+    if ( physics )
     {
-      gazebo::physics::JointPtr hj = this->joints_[i];
-      double current_velocity = hj->GetVelocity(0);
-      double damping_force = damping_coef * current_velocity;
-      double effort_command = effort - damping_force;
-      hj->SetForce(0,effort_command);
-      //if (this->joints_[i]->GetName() == "torso_lift_motor_screw_joint")
-      //  ROS_ERROR("gazebo [%s] command [%f] damping [%f]",this->joints_[i]->GetName().c_str(), effort, damping_force);
-    }
-    else if (this->joints_[i]->HasType(gazebo::physics::Base::SLIDER_JOINT))
-    {
-      gazebo::physics::JointPtr sj = this->joints_[i];
-      double current_velocity = sj->GetVelocity(0);
-      double damping_force = damping_coef * current_velocity;
-      double effort_command = effort-damping_force;
-      sj->SetForce(0,effort_command);
-      //if (this->joints_[i]->GetName() == "torso_lift_joint")
-      //  ROS_ERROR("gazebo [%s] command [%f] damping [%f]",this->joints_[i]->GetName().c_str(), effort, damping_force);
-    }
-  }
+        double damping_coef = 0;
+        if (this->cm_->state_ != NULL) // could be NULL if ReadPr2Xml is unsuccessful
+        {
+          if (this->cm_->state_->joint_states_[i].joint_->dynamics)
+            damping_coef = this->cm_->state_->joint_states_[i].joint_->dynamics->damping;
+        }
+
+        if (this->joints_[i]->HasType(gazebo::physics::Base::HINGE_JOINT))
+        {
+          gazebo::physics::JointPtr hj = this->joints_[i];
+          double current_velocity = hj->GetVelocity(0);
+          double damping_force = damping_coef * current_velocity;
+          double effort_command = effort - damping_force;
+          hj->SetForce(0,effort_command);
+          //if (this->joints_[i]->GetName() == "torso_lift_motor_screw_joint")
+          //  ROS_ERROR("gazebo [%s] command [%f] damping [%f]",this->joints_[i]->GetName().c_str(), effort, damping_force);
+        }
+        else if (this->joints_[i]->HasType(gazebo::physics::Base::SLIDER_JOINT))
+        {
+          gazebo::physics::JointPtr sj = this->joints_[i];
+          double current_velocity = sj->GetVelocity(0);
+          double damping_force = damping_coef * current_velocity;
+          double effort_command = effort-damping_force;
+          sj->SetForce(0,effort_command);
+          //if (this->joints_[i]->GetName() == "torso_lift_joint")
+          //  ROS_ERROR("gazebo [%s] command [%f] damping [%f]",this->joints_[i]->GetName().c_str(), effort, damping_force);
+        }
+      }
+}
 }
 
 
@@ -424,12 +471,20 @@ void GazeboRosControllerManager::ControllerManagerROSThread()
   ROS_INFO_STREAM("Callback thread id=" << boost::this_thread::get_id());
 
   //ros::Rate rate(1000);
+//  ros::Subscriber state_sub = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+
+/*  ros::Subscriber state_sub = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+
+  ros::Subscriber state_sub = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+
+  ros::Subscriber state_sub = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );*/
 
   while (this->rosnode_->ok())
   {
     //rate.sleep(); // using rosrate gets stuck on model delete
     usleep(1000);
     ros::spinOnce();
+    // ROS_INFO_STREAM("SPINING");
   }
 }
   // Register this plugin with the simulator
