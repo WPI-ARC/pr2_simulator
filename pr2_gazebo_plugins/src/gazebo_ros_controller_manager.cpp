@@ -81,10 +81,8 @@ void GazeboRosControllerManager::setPr2JointGoals(const pr2_controllers_msgs::Jo
     for( size_t i = 0; i < msg.desired.positions.size(); i++ )
     {
         //lookup for the joint index
-        //
-        for (unsigned int j = 0; j < this->joints_.size(); j++) 
+        for (unsigned int j=0; j < this->joints_.size(); j++) 
         {
-
             if ( strcmp(this->joints_[j]->GetName().c_str(), msg.joint_names[i].c_str()) == 0 ) 
             {
                 des_position[j] = msg.desired.positions[i];
@@ -471,18 +469,13 @@ void GazeboRosControllerManager::ControllerManagerROSThread()
   ROS_INFO_STREAM("Callback thread id=" << boost::this_thread::get_id());
 
   //ros::Rate rate(1000);
-//  ros::Subscriber state_sub = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
-
-/*  ros::Subscriber state_sub = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
-
-  ros::Subscriber state_sub = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
-
-  ros::Subscriber state_sub = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );*/
+  ros::Subscriber state_sub_larm = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+  ros::Subscriber state_sub_rarm = this->rosnode_->subscribe( "/l_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
 
   while (this->rosnode_->ok())
   {
     //rate.sleep(); // using rosrate gets stuck on model delete
-    usleep(1000);
+    usleep(10000);
     ros::spinOnce();
     // ROS_INFO_STREAM("SPINING");
   }
