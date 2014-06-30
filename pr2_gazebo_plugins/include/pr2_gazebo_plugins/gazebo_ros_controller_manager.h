@@ -136,6 +136,8 @@ private:
   private: transport::SubscriberPtr statsSub;
   private: common::Time simTime;
 
+    bool physics_;
+
 };
 
 }

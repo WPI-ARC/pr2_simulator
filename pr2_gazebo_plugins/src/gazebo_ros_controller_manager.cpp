@@ -144,7 +144,8 @@ void GazeboRosControllerManager::Load(physics::ModelPtr _parent, sdf::ElementPtr
       boost::bind(&GazeboRosControllerManager::UpdateChild, this));
   gzdbg << "plugin model name: " << modelName << "\n";
 
-  this->world->EnablePhysicsEngine(false); //TODO should be false
+  physics_ = false;
+  this->world->EnablePhysicsEngine(physics_); //TODO should be false
 
 
   if (getenv("CHECK_SPEEDUP"))
@@ -234,6 +235,7 @@ void GazeboRosControllerManager::Load(physics::ModelPtr _parent, sdf::ElementPtr
 
 void GazeboRosControllerManager::UpdateChild()
 {
+    
   if (this->world->IsPaused()) return;
 
   if (getenv("CHECK_SPEEDUP"))
@@ -302,18 +304,22 @@ void GazeboRosControllerManager::UpdateChild()
   //  Runs Mechanism Control
   //--------------------------------------------------
   this->hw_.current_time_ = ros::Time(this->world->GetSimTime().Double());
-  try
-  {
-    if (this->cm_->state_ != NULL) // could be NULL if ReadPr2Xml is unsuccessful
-      this->cm_->update();
-  }
-  catch (const char* c)
-  {
-    if (strcmp(c,"dividebyzero")==0)
-      ROS_WARN("pid controller reports divide by zero error");
-    else
-      ROS_WARN("unknown const char* exception: %s", c);
-  }
+
+    if( physics_ )
+    {
+      try
+      {
+        if (this->cm_->state_ != NULL) // could be NULL if ReadPr2Xml is unsuccessful
+          this->cm_->update();
+      }
+      catch (const char* c)
+      {
+        if (strcmp(c,"dividebyzero")==0)
+          ROS_WARN("pid controller reports divide by zero error");
+        else
+          ROS_WARN("unknown const char* exception: %s", c);
+      }
+    }
 
   //--------------------------------------------------
   //  Takes in actuation commands
@@ -343,8 +349,7 @@ void GazeboRosControllerManager::UpdateChild()
         ROS_WARN("set angles is falied");
     }
 
-    bool physics = true;
-    if ( physics )
+    if ( physics_ )
     {
         double damping_coef = 0;
         if (this->cm_->state_ != NULL) // could be NULL if ReadPr2Xml is unsuccessful
@@ -468,14 +473,17 @@ void GazeboRosControllerManager::ControllerManagerROSThread()
 {
   ROS_INFO_STREAM("Callback thread id=" << boost::this_thread::get_id());
 
-  //ros::Rate rate(1000);
-  ros::Subscriber state_sub_larm = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
-  ros::Subscriber state_sub_rarm = this->rosnode_->subscribe( "/l_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+    if( !physics_ )
+    {
+      //ros::Rate rate(1000);
+      ros::Subscriber state_sub_larm = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+      ros::Subscriber state_sub_rarm = this->rosnode_->subscribe( "/l_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+    }
 
   while (this->rosnode_->ok())
   {
     //rate.sleep(); // using rosrate gets stuck on model delete
-    usleep(10000);
+    usleep(100000);
     ros::spinOnce();
     // ROS_INFO_STREAM("SPINING");
   }
