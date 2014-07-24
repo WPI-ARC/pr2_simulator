@@ -33,6 +33,7 @@
 #include <math.h>
 #include <unistd.h>
 #include <set>
+#include <cmath>
 
 //#include <gazebo/XMLConfig.hh>
 //#include "physics/physics.h"
@@ -44,10 +45,6 @@
 #include "common/Exception.hh"
 #include "physics/PhysicsTypes.hh"
 #include "physics/Base.hh"
-
-// ADDED for position control
-//#include <trajectory_msgs/JointTrajectoryState.h>
-// #include <trajectory_msgs/JointTrajectoryPoint.h>
 #include <pr2_controllers_msgs/JointTrajectoryControllerState.h>
 
 #include <angles/angles.h>
@@ -58,40 +55,73 @@ namespace gazebo {
 
 GazeboRosControllerManager::GazeboRosControllerManager()
 {
-
 }
 
 /// \brief callback for setting models joints states
 bool setModelsJointsStates(pr2_gazebo_plugins::SetModelsJointsStates::Request &req,
                            pr2_gazebo_plugins::SetModelsJointsStates::Response &res)
 {
-  ROS_DEBUG("setModelsJointsStates");
+
   return true;
 }
 
-// TODO change the length of array to number of joints
-double des_position[100];
+double des_positions_[100];
+double des_positions_last_[100];
+bool set_angle_=false;
+bool set_angle_tmp[100] = { 0 };
+bool not_use_physics = true;
+//std::map<std::string, double> des_position_;
+gazebo_msgs::ModelState graspedPose;
+
+
+void GazeboRosControllerManager::setGraspedPose(const gazebo_msgs::ModelState& msg)
+{
+    //ROS_INFO("received pose for grasped object");
+    graspedPose = msg;
+    //std::cout << msg << std::endl;
+}
 
 void GazeboRosControllerManager::setPr2JointGoals(const pr2_controllers_msgs::JointTrajectoryControllerState& msg)
 {
     //ROS_INFO("received point r_arm");
 
     //this->joints_.size()
-
+    //set_angle_=false;
+    //bool set_angle_tmp=false;
+    
     for( size_t i = 0; i < msg.desired.positions.size(); i++ )
     {
         //lookup for the joint index
-        for (unsigned int j=0; j < this->joints_.size(); j++) 
+        for (unsigned int j=0; j < this->joints_.size(); j++)
         {
             if ( strcmp(this->joints_[j]->GetName().c_str(), msg.joint_names[i].c_str()) == 0 ) 
             {
-                des_position[j] = msg.desired.positions[i];
+                
+                des_positions_[j] = msg.desired.positions[i];
+                // if ( std::fabs(this->joints_[j]->GetAngle(0).Radian() - msg.desired.positions[i]) > 0.00001) {
+                if ( std::fabs( des_positions_[j] - des_positions_last_[j] ) > 0.0000001) {
+                    //ROS_INFO("updating position");
+                    set_angle_tmp[j] = true;
+                }
+                else set_angle_tmp[j] = false;
                 //ROS_INFO("received point: [%s] [%f]", msg.joint_names[i].c_str() , msg.desired.positions[i] );
             }
         }
             //ROS_INFO("received point: [%s] [%f]", msg.joint_names[i].c_str() , msg.desired.positions[i] );
     }
+    
+    for(int i=0; i<100; i++)
+        if ( set_angle_tmp[i] ) {
+            set_angle_ = true;
+            break;
+        }
+        else set_angle_ = false;
+
+
+    for(int i=0; i<100; i++)
+        des_positions_last_[i] = des_positions_[i];
 }
+
 
 GazeboRosControllerManager::~GazeboRosControllerManager()
 {
@@ -144,8 +174,8 @@ void GazeboRosControllerManager::Load(physics::ModelPtr _parent, sdf::ElementPtr
       boost::bind(&GazeboRosControllerManager::UpdateChild, this));
   gzdbg << "plugin model name: " << modelName << "\n";
 
-  physics_ = false;
-  this->world->EnablePhysicsEngine(physics_); //TODO should be false
+  if ( not_use_physics ) this->world->EnablePhysicsEngine(false); //TODO should be false
+  //this->world->GetPhysicsEngine()->SetUpdateRate(10000);
 
 
   if (getenv("CHECK_SPEEDUP"))
@@ -230,12 +260,12 @@ void GazeboRosControllerManager::Load(physics::ModelPtr _parent, sdf::ElementPtr
   // start custom queue for controller manager
   this->controller_manager_callback_queue_thread_ = boost::thread( boost::bind( &GazeboRosControllerManager::ControllerManagerQueueThread,this ) );
 #endif
+
 }
 
 
 void GazeboRosControllerManager::UpdateChild()
 {
-    
   if (this->world->IsPaused()) return;
 
   if (getenv("CHECK_SPEEDUP"))
@@ -269,7 +299,7 @@ void GazeboRosControllerManager::UpdateChild()
                     angles::shortest_angular_distance(this->fake_state_->joint_states_[i].position_,hj->GetAngle(0).Radian());
       this->fake_state_->joint_states_[i].velocity_ = hj->GetVelocity(0);
       //if (this->joints_[i]->GetName() == "torso_lift_motor_screw_joint")
-      //ROS_WARN("joint[%s] [%f]",this->joints_[i]->GetName().c_str(), this->fake_state_->joint_states_[i].position_);
+      //  ROS_WARN("joint[%s] [%f]",this->joints_[i]->GetName().c_str(), this->fake_state_->joint_states_[i].position_);
     }
     else if (this->joints_[i]->HasType(gazebo::physics::Base::SLIDER_JOINT))
     {
@@ -284,11 +314,10 @@ void GazeboRosControllerManager::UpdateChild()
     }
     else
     {
-      
-//      ROS_WARN("joint[%s] is not hinge [%d] nor slider",this->joints_[i]->GetName().c_str(),
-//        (unsigned int)gazebo::physics::Base::HINGE_JOINT
-//        );
-/*
+      /*
+      ROS_WARN("joint[%s] is not hinge [%d] nor slider",this->joints_[i]->GetName().c_str(),
+        (unsigned int)gazebo::physics::Base::HINGE_JOINT
+        );
       for (unsigned int j = 0; j < this->joints_[i]->GetTypeCount(); j++)
       {
         ROS_WARN("  types: %d hinge[%d] slider[%d]",(unsigned int)this->joints_[i]->GetType(j),(unsigned int)this->joints_[i]->HasType(gazebo::physics::Base::HINGE_JOINT),(unsigned int)this->joints_[i]->HasType(gazebo::physics::Base::SLIDER_JOINT));
@@ -304,22 +333,18 @@ void GazeboRosControllerManager::UpdateChild()
   //  Runs Mechanism Control
   //--------------------------------------------------
   this->hw_.current_time_ = ros::Time(this->world->GetSimTime().Double());
-
-    if( physics_ )
-    {
-      try
-      {
-        if (this->cm_->state_ != NULL) // could be NULL if ReadPr2Xml is unsuccessful
-          this->cm_->update();
-      }
-      catch (const char* c)
-      {
-        if (strcmp(c,"dividebyzero")==0)
-          ROS_WARN("pid controller reports divide by zero error");
-        else
-          ROS_WARN("unknown const char* exception: %s", c);
-      }
-    }
+  try
+  {
+    if (this->cm_->state_ != NULL) // could be NULL if ReadPr2Xml is unsuccessful
+      this->cm_->update();
+  }
+  catch (const char* c)
+  {
+    if (strcmp(c,"dividebyzero")==0)
+      ROS_WARN("pid controller reports divide by zero error");
+    else
+      ROS_WARN("unknown const char* exception: %s", c);
+  }
 
   //--------------------------------------------------
   //  Takes in actuation commands
@@ -328,6 +353,8 @@ void GazeboRosControllerManager::UpdateChild()
   // Reverses the transmissions to propagate the actuator commands into the joints.
   this->fake_state_->propagateActuatorEffortToJointEffort();
 
+  gazebo::physics::ModelPtr grasped_model = this->world->GetModel( graspedPose.model_name );
+
   // Copies the commands from the mechanism joints into the gazebo joints.
   for (unsigned int i = 0; i < this->joints_.size(); ++i)
   {
@@ -335,22 +362,45 @@ void GazeboRosControllerManager::UpdateChild()
       continue;
 
 
-    double effort = this->fake_state_->joint_states_[i].commanded_effort_;
-    //double position = 0.1;
 
-//    ROS_WARN("gazebo [%s] command [%f] position [%f]",this->joints_[i]->GetName().c_str(), effort, position);
-    
-    try
-    {
-        this->joints_[i]->SetAngle( 0, des_position[i] );
-    }
-    catch (int e)
-    {
-        ROS_WARN("set angles is falied");
-    }
+    if ( not_use_physics ) {
+        if (set_angle_) {
+            try
+            {
+                this->joints_[i]->SetAngle( 0, des_positions_[i] );
+                
+                try
+                {
+                    //std::cout << graspedPose.pose.position << std::endl;
 
-    if ( physics_ )
-    {
+                    //grasped_model -> SetWorldPose( math::Pose( math::Vector3(graspedPose.pose.position.x, graspedPose.pose.position.y, graspedPose.pose.position.z), math::Quaternion(graspedPose.pose.orientation.x, graspedPose.pose.orientation.y, graspedPose.pose.orientation.z, graspedPose.pose.orientation.w) ), true, true);//TODO
+                    grasped_model -> SetWorldPose( math::Pose( math::Vector3(graspedPose.pose.position.x, graspedPose.pose.position.y, graspedPose.pose.position.z), math::Quaternion(graspedPose.pose.orientation.x, graspedPose.pose.orientation.y, graspedPose.pose.orientation.z, graspedPose.pose.orientation.w) ), true, true);//TODO
+                }
+                catch (int e)
+                {
+                    ROS_WARN("model not initialized");
+                }
+                // TODO: graspedPose.pose.position.x, graspedPose.pose.position.y, graspedPose.pose.position.z
+                // TODO:Add: graspedPose.pose.orientation.x, graspedPose.pose.orientation.y, graspedPose.pose.orientation.z, graspedPose.pose.orientation.w 
+
+                //std::cout << grasped_model->SetState ( grasped_state ) << std::endl;
+                //grasped_model->SetState(  );
+            }
+            catch (int e)
+            {
+                ROS_WARN("set angles is falied");
+            }
+        }
+    }
+    else {
+//        false;
+//    }
+//    
+
+//    if (true) {
+
+        double effort = this->fake_state_->joint_states_[i].commanded_effort_;
+
         double damping_coef = 0;
         if (this->cm_->state_ != NULL) // could be NULL if ReadPr2Xml is unsuccessful
         {
@@ -377,9 +427,9 @@ void GazeboRosControllerManager::UpdateChild()
           sj->SetForce(0,effort_command);
           //if (this->joints_[i]->GetName() == "torso_lift_joint")
           //  ROS_ERROR("gazebo [%s] command [%f] damping [%f]",this->joints_[i]->GetName().c_str(), effort, damping_force);
-        }
-      }
-}
+    }
+    }
+  }
 }
 
 
@@ -473,19 +523,25 @@ void GazeboRosControllerManager::ControllerManagerROSThread()
 {
   ROS_INFO_STREAM("Callback thread id=" << boost::this_thread::get_id());
 
-    if( !physics_ )
-    {
-      //ros::Rate rate(1000);
-      ros::Subscriber state_sub_larm = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
-      ros::Subscriber state_sub_rarm = this->rosnode_->subscribe( "/l_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
-    }
+  //ros::Rate rate(1000);
+  ros::Subscriber state_sub_larm;
+  ros::Subscriber state_sub_rarm;
+  ros::Subscriber state_sub_rgripper;
+  ros::Subscriber state_sub_grasped;
+
+  if ( not_use_physics ) {
+      state_sub_larm = this->rosnode_->subscribe( "/r_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+      state_sub_rarm = this->rosnode_->subscribe( "/l_arm_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+      //state_sub_rgripper = this->rosnode_->subscribe( "/r_gripper_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+      //state_sub_rgripper = this->rosnode_->subscribe( "/l_gripper_controller/state" , 1, &GazeboRosControllerManager::setPr2JointGoals, this );
+      state_sub_grasped = this->rosnode_->subscribe( "/grasped_publisher" , 1, &GazeboRosControllerManager::setGraspedPose, this );
+  }
 
   while (this->rosnode_->ok())
   {
     //rate.sleep(); // using rosrate gets stuck on model delete
     usleep(100000);
     ros::spinOnce();
-    // ROS_INFO_STREAM("SPINING");
   }
 }
   // Register this plugin with the simulator

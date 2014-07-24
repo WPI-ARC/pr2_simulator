@@ -44,6 +44,7 @@
 #include "pr2_gazebo_plugins/SetModelsJointsStates.h"
 #include "pr2_mechanism_model/robot.h"
 #include <pr2_controllers_msgs/JointTrajectoryControllerState.h>
+#include <gazebo_msgs/ModelState.h>
 
 #include <tinyxml.h>
 #include <ros/ros.h>
@@ -84,6 +85,9 @@ private:
   //private: ParamT<std::string> *setModelsJointsStatesServiceNameP;
   //private: std::string setModelsJointsStatesServiceName;
 
+
+  void setGraspedPose(const gazebo_msgs::ModelState& msg);
+
   void setPr2JointGoals(const pr2_controllers_msgs::JointTrajectoryControllerState& msg);
 
   /*
@@ -116,6 +120,8 @@ private:
   std::string robotNamespace;
 
   bool fake_calibration_;
+  //double des_positions_[100];
+  //bool set_angle_;
 
 #ifdef USE_CBQ
   private: ros::CallbackQueue controller_manager_queue_;
